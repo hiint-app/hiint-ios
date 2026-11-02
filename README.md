@@ -2,8 +2,6 @@
 
 Show your [hiint](https://hiint.app) feedback board, roadmap and updates inside your app. Your users post ideas and bugs, vote and comment without leaving it, and you triage everything in your hiint dashboard as usual.
 
-> **0.1 is in development.** It needs the matching hiint release, which isn't deployed yet.
-
 The board appears exactly as it does in a phone's browser, in a sheet on iOS and in its own window on macOS. Every improvement to your board reaches your app without an SDK update.
 
 ## Requirements

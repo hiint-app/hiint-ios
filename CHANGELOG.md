@@ -2,7 +2,7 @@
 
 Versions follow [semantic versioning](https://semver.org), and each release is a tag of the same name (`0.1.0`, no `v`).
 
-## Unreleased: 0.1.0
+## 0.1.0 (2 November 2026)
 
 The first version, with normal sign-in.
 
