@@ -1,6 +1,6 @@
-# The Swift SDK, version 0.1
+# The Swift SDK, version 0.2
 
-The plan this follows is `docs/plans/pending/mobile-sdks.md` in the hiint repository (step 3 of the mobile SDKs). hiint's side of it (steps 1 and 2, and `hello`) isn't built yet, so 0.1 can't load a real board until it is; everything that can be checked without a server is covered by the unit tests.
+The plan this follows is `docs/plans/completed/mobile-sdks.md` in the hiint repository, and automatic login is `docs/plans/completed/automatic-login.md`. Everything that can be checked without a server is covered by the unit tests.
 
 ## What it does
 
@@ -10,12 +10,13 @@ An app maker adds the package, calls `Hiint.setup(workspace: "driftnote")` at la
 
 1. **`Hiint.setup`** stores the workspace slug in `HiintClient.shared` and starts a `HelloLoader`, which fetches `GET https://hiint.app/api/sdk/v1/<slug>/hello`. The answer (the board's address, which sections are on, the public boards, recent update dates) is kept in memory and in `UserDefaults`, so the next launch has an address straight away while a fresh copy loads.
 2. **`Hiint.showFeedback`** (or roadmap, updates, a request) asks `BoardPresenter` to present the board. On iOS that's a `HiintViewController` in a page sheet over the top-most view controller; on macOS a `HiintWindowController` opens a centred window. The controller shows a spinner and asks `HiintClient` for a `BoardDestination`: it waits for `hello`, falls back to the feedback board if the section is hidden or the board slug unknown (printing why), and builds the page's URL on the board's own address.
-3. **`BoardWebView`** loads that page in a `WKWebView` whose user agent has `HiintSDK/0.1.0 (iPhone; iOS 26.1; AppVersion/3.4)` added to the end. That text is how hiint knows it's inside an app: it hides the Dashboard item and records the device line. The web view fades in when the page posts `ready`, when it finishes loading, or after three seconds, whichever is first.
+3. **`BoardWebView`** loads that page in a `WKWebView` whose user agent has `HiintSDK/0.2.0 (iPhone; iOS 26.1; AppVersion/3.4)` added to the end. That text is how hiint knows it's inside an app: it hides the Dashboard item and records the device line. The web view fades in when the page posts `ready`, when it finishes loading, or after three seconds, whichever is first.
 4. **Every navigation** goes through `navigationDecision`. The board's own origin and hiint's sign-in pages (`/login`, `/signup`, `/auth/…` and so on, on `hiint.app`) stay in the sheet; anything else opens in the system browser. Links that would open a new tab are handled the same way.
 5. **The page talks to the SDK** by posting JSON to `window.webkit.messageHandlers.hiint`. `BridgeMessage` reads it: `ready`, `openExternal`, `signIn` and `unreadUpdates`, with anything newer ignored.
 6. **Google and GitHub sign-in:** the page posts `signIn { provider: "google" or "github", returnPath }`; the SDK passes the provider through unchanged. The SDK makes a `SignInChallenge` (a random verifier and its SHA-256 challenge), and opens `https://hiint.app/sdk/sign-in?…&challenge=…` in `ASWebAuthenticationSession`. When hiint redirects to `hiint-sdk://signed-in?code=…`, the sheet closes and the web view loads `https://hiint.app/sdk/session?code=…&verifier=…`, which turns the code into a session and sends the web view back to the page it was on.
 7. **The badge:** `unreadUpdatesCount()` counts `hello`'s recent update dates later than the time Updates was last opened on this device. Opening Updates, from the app or from the tab inside the sheet, resets it.
-8. **`logout`** forgets the identity and deletes hiint's cookies from the web view's store, so the next person to use the app isn't signed in as the last.
+8. **Automatic login (0.2).** When `identify` has been called, `destination(for:)` (which `show…` and the URL getters use) `POST`s to `/api/sdk/v1/<slug>/identify` with a fresh PKCE challenge and loads `/api/board/app-session` on the board's host instead of the page. An unsigned identity's claim token (`unsignedClaimAccount` decides which identities have one) is read and written through `ClaimTokenStore`: the Keychain in the app (`ClaimTokenKeychain`, service `app.hiint.claim`), a dictionary in tests. A `403` of `automatic_login_off` is remembered until the next `setup`; any other refusal prints once and opens the board as it is, where an app session it already has still counts.
+9. **`logout`** forgets the identity, `POST`s the board's `/api/board/sign-out` with the web view's cookie and an `Origin`, then deletes hiint's cookies. The claim token stays.
 
 ## The pieces
 
@@ -60,8 +61,8 @@ An app maker adds the package, calls `Hiint.setup(workspace: "driftnote")` at la
 - **Nothing works end to end until hiint ships its side:** `hello`, recognising the user agent, the bridge script in the board, `/sdk/sign-in`, `/sdk/complete` and `/sdk/session`. Until then `setup` prints "No hiint workspace is called …" (a 404 from `hello`), and the sheet shows "Couldn't load feedback".
 - **The contract is versioned.** The `hello` fields, the user agent format, the bridge messages and the `/sdk/…` paths are `v1`. Changing any of them in a way an old SDK can't read means a `v2` beside it, because apps in the App Store keep the version they shipped with.
 - **The user agent is appended, never replaced,** on purpose (see the glossary). Don't "fix" Google sign-in by replacing it.
-- **`identify` only passes the email to Google sign-in in 0.1.** The name, photo and signature are stored for automatic login (step 5 of the plan), which will swap them for a one-time code; they never go in a URL.
-- **`logout` deletes cookies, not the server session.** The session row lives until it expires on hiint's side, but nothing on the device can use it any more. Cookies on the customer's own domain (other than the board's exact host) are never touched.
+- **`identify` never puts the identity in a URL.** The exchange is a `POST`, and the web view only ever sees the one-time code and the verifier.
+- **`logout` revokes the session, then deletes the cookie.** It `POST`s `/api/board/sign-out` with the board's cookie and an `Origin`. The claim token stays in the Keychain, so the same install can sign in as that person again. Cookies on the customer's own domain (other than the board's exact host) are never touched.
 - **The first `unreadUpdatesCount()` returns 0** and records "now", so updates published before someone installed the app don't show as new.
 - **On macOS** the board always opens in a window, whatever the presentation style. A sandboxed app needs the outgoing-connections entitlement.
 - **What I'd change first if requirements move:** the navigation allow-list in `NavigationPolicy.swift` (any new hiint sign-in page has to be added there, or it will open in Safari mid-sign-in), and `availableSection` if hiint ever lets the app open a team-only board.

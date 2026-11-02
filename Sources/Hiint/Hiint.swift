@@ -12,7 +12,7 @@ public enum HiintPresentationStyle: Sendable {
 @MainActor
 public enum Hiint {
     /// This SDK's version, sent to hiint in the web view's user agent.
-    nonisolated public static let version = "0.1.0"
+    nonisolated public static let version = "0.2.0"
 
     /// hiint's own address. Only change it to point at a local hiint while developing.
     nonisolated public static let defaultServerURL = URL(string: "https://hiint.app")!
@@ -22,12 +22,12 @@ public enum Hiint {
         HiintClient.shared.setup(workspace: workspace, server: serverURL)
     }
 
-    /// Tells hiint who is using the app. In this version the email is offered when they sign in.
+    /// Tells hiint who is using the app. Pass `signature` from your server, or leave it out and the install keeps a claim token.
     public static func identify(
         userId: String, email: String? = nil, name: String? = nil, avatarURL: URL? = nil, signature: String? = nil
     ) {
         HiintClient.shared.identify(
-            Identity(userId: userId, email: email, name: name, avatarURL: avatarURL, signature: signature))
+            userId: userId, email: email, name: name, avatarURL: avatarURL, signature: signature)
     }
 
     /// Forgets the identified user and signs the board out on this device. Call it when they log out of your app.
@@ -56,16 +56,17 @@ public enum Hiint {
     }
 
     /// The feedback board's address, for showing it in your own web view. `nil` until the board's details have loaded.
+    /// With automatic login it signs the person in, so load it straight away: it works once, within 60 seconds.
     public static func feedbackURL(board: String? = nil) async -> URL? {
         await HiintClient.shared.destination(for: .feedback(board: board))?.pageURL
     }
 
-    /// The roadmap's address, for showing it in your own web view.
+    /// The roadmap's address, for showing it in your own web view. With automatic login, load it straight away (see `feedbackURL`).
     public static func roadmapURL() async -> URL? {
         await HiintClient.shared.destination(for: .roadmap)?.pageURL
     }
 
-    /// The updates' address, for showing it in your own web view.
+    /// The updates' address, for showing it in your own web view. With automatic login, load it straight away (see `feedbackURL`).
     public static func updatesURL() async -> URL? {
         await HiintClient.shared.destination(for: .updates)?.pageURL
     }

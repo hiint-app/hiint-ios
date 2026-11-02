@@ -17,7 +17,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/hiint-app/hiint-ios", from: "0.1.0")
+    .package(url: "https://github.com/hiint-app/hiint-ios", from: "0.2.0")
 ]
 ```
 
@@ -83,7 +83,9 @@ Hiint.logout()
 Hiint.identify(userId: user.id, email: user.email, name: user.name)
 ```
 
-In 0.1 the email is offered when they sign in with Google. A later version adds automatic login (Pro), which signs your users straight in; calling `identify` now means your app needs no change for it.
+With automatic login on (Pro), this signs them straight in the next time the board opens. Only `userId` is required: pass `email` and hiint emails them about their own requests and comments, and `name` (they get a random one without it). If your app has a server, pass the `signature` it makes with your project secret; that's what proves who they are.
+
+Without one, the SDK keeps a claim token for that user ID in the Keychain, so another device can't later sign in as them. `logout()` signs the board out and leaves the claim token in place.
 
 ## A "What's new" badge
 

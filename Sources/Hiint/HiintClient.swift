@@ -10,13 +10,13 @@ struct BoardDestination: Equatable, Sendable {
     let email: String?
 }
 
-/** The person the app says is using it, from `Hiint.identify`. */
-struct Identity: Equatable, Sendable {
+/** The person the app says is using it. */
+struct AppIdentity: Equatable, Sendable {
     let userId: String
-    let email: String?
-    let name: String?
-    let avatarURL: URL?
-    let signature: String?
+    let email: String
+    let name: String
+    let avatarURL: String
+    let signature: String
 }
 
 /** The SDK's state for the app's run: the workspace, its `hello`, and who's identified. */
@@ -26,8 +26,12 @@ final class HiintClient {
 
     private(set) var server: URL = Hiint.defaultServerURL
     private(set) var helloLoader: HelloLoader?
-    private(set) var identity: Identity?
+    private(set) var identity: AppIdentity?
+    /// Set when identify answers that automatic login is off, until the next `setup`.
+    private var automaticLoginIsOff = false
+    private var identifyWarning: String?
     private let updatesOpened = UpdatesOpenedStore()
+    var claimTokens = ClaimTokenStore.keychain
 
     var workspace: String? { helloLoader?.workspace }
 
@@ -38,20 +42,25 @@ final class HiintClient {
             return
         }
         self.server = server
+        automaticLoginIsOff = false
+        identifyWarning = nil
         let loader = HelloLoader(workspace: slug, serverURL: server)
         helloLoader = loader
         loader.refresh()
     }
 
-    func identify(_ identity: Identity) {
-        self.identity = identity
+    func identify(userId: String, email: String?, name: String?, avatarURL: URL?, signature: String?) {
+        identifyWarning = nil
+        identity = AppIdentity(
+            userId: userId, email: email ?? "", name: name ?? "", avatarURL: avatarURL?.absoluteString ?? "",
+            signature: signature ?? "")
     }
 
     func logout() {
         identity = nil
-        let boardHost = helloLoader?.hello?.boardUrl.host
+        let boardAddress = helloLoader?.hello?.boardUrl
         let serverHost = server.host
-        Task { await removeBoardCookies(serverHost: serverHost, boardHost: boardHost) }
+        Task { await signOut(boardAddress: boardAddress, serverHost: serverHost) }
     }
 
     func destination(for requested: BoardSection) async -> BoardDestination? {
@@ -63,9 +72,11 @@ final class HiintClient {
         let (section, problem) = availableSection(requested, hello: hello)
         if let problem { warn(problem) }
         guard let pageURL = boardURL(boardAddress: hello.boardUrl, section: section) else { return nil }
+        let signedInURL = await signedInURL(for: pageURL, workspace: helloLoader.workspace)
         return BoardDestination(
-            pageURL: pageURL, boardAddress: hello.boardUrl, server: server, workspace: helloLoader.workspace,
-            email: identity?.email)
+            pageURL: signedInURL ?? pageURL, boardAddress: hello.boardUrl, server: server,
+            workspace: helloLoader.workspace,
+            email: identity?.email.isEmpty == false ? identity?.email : nil)
     }
 
     func markUpdatesOpened() {
@@ -80,6 +91,63 @@ final class HiintClient {
             return 0
         }
         return unreadUpdateCount(recentUpdates: hello.recentUpdates, lastOpened: lastOpened)
+    }
+
+    private func signedInURL(for pageURL: URL, workspace: String) async -> URL? {
+        guard let identity, !automaticLoginIsOff else { return nil }
+        let challenge = SignInChallenge()
+        let claimAccount = unsignedClaimAccount(
+            userId: identity.userId, signature: identity.signature, serverHost: server.host ?? "", workspace: workspace)
+        let claimToken = claimAccount.flatMap(claimTokens.read) ?? ""
+        let call = IdentifyCall(
+            userId: identity.userId, email: identity.email, name: identity.name, avatarURL: identity.avatarURL,
+            signature: identity.signature, claimToken: claimToken, challenge: challenge.challenge)
+        guard let request = identifyRequest(serverURL: server, workspace: workspace, call: call) else { return nil }
+        let result: IdentifyResult
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            result = identifyResult(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
+        } catch {
+            warnOnce("Automatic login didn’t finish (\(error.localizedDescription)). The board opened without it.")
+            return nil
+        }
+        switch result {
+        case .signedIn(let code, let issuedClaimToken):
+            if let issuedClaimToken, let claimAccount {
+                claimTokens.save(claimAccount, issuedClaimToken)
+            }
+            return appSessionURL(
+                boardAddress: pageURL, code: code, verifier: challenge.verifier, returnPath: boardReturnPath(of: pageURL))
+        case .automaticLoginOff:
+            automaticLoginIsOff = true
+            return nil
+        case .refused(let reason):
+            warnOnce("Automatic login was refused (\(reason)). The board opened without it.")
+            return nil
+        case .unreadable:
+            warnOnce("Automatic login’s answer couldn’t be read. The board opened without it.")
+            return nil
+        }
+    }
+
+    private func warnOnce(_ message: String) {
+        guard identifyWarning != message else { return }
+        identifyWarning = message
+        warn(message)
+    }
+
+    private func signOut(boardAddress: URL?, serverHost: String?) async {
+        if let boardAddress {
+            let cookies = await WKWebsiteDataStore.default().httpCookieStore.allCookies().filter {
+                isHiintCookie(domain: $0.domain, serverHost: nil, boardHost: boardAddress.host)
+            }
+            if let request = signOutRequest(
+                boardAddress: boardAddress, cookies: cookies.map { (name: $0.name, value: $0.value) })
+            {
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
+        await removeBoardCookies(serverHost: serverHost, boardHost: boardAddress?.host)
     }
 
     private func removeBoardCookies(serverHost: String?, boardHost: String?) async {

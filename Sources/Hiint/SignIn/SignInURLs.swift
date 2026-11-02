@@ -22,6 +22,11 @@ enum ServerAddresses {
             ]))
     }
 
+    static func identifyURL(serverURL: URL, workspace: String) -> URL? {
+        guard !workspace.isEmpty else { return nil }
+        return hiintAddress(on: serverURL, path: "/api/sdk/v1/\(percentEncoded(workspace))/identify")
+    }
+
     static func sessionURL(serverURL: URL, code: String, verifier: String) -> URL? {
         hiintAddress(on: serverURL, path: "/sdk/session", query: percentEncodedQuery(["code": code, "verifier": verifier]))
     }
