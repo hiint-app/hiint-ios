@@ -1,0 +1,16 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests (macOS)
+        run: swift test
+      - name: Build for iOS
+        run: xcodebuild build -scheme Hiint -destination 'generic/platform=iOS Simulator' -quiet

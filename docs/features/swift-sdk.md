@@ -1,0 +1,67 @@
+# The Swift SDK, version 0.1
+
+The plan this follows is `docs/plans/pending/mobile-sdks.md` in the hiint repository (step 3 of the mobile SDKs). hiint's side of it (steps 1 and 2, and `hello`) isn't built yet, so 0.1 can't load a real board until it is; everything that can be checked without a server is covered by the unit tests.
+
+## What it does
+
+An app maker adds the package, calls `Hiint.setup(workspace: "driftnote")` at launch and `Hiint.showFeedback()` from a button. Their hiint board slides up in a sheet (a window on macOS), looking exactly as it does in a phone's browser. People sign in with their hiint account as they would on the web; only **Continue with Google** behaves differently, opening iOS's own sign-in sheet because Google won't sign anyone in inside an app's web view. Links that leave the board open in Safari, the app can show a "What's new" count on its own button, and hiint learns the device, OS and app version of anything posted from the app.
+
+## How it works
+
+1. **`Hiint.setup`** stores the workspace slug in `HiintClient.shared` and starts a `HelloLoader`, which fetches `GET https://hiint.app/api/sdk/v1/<slug>/hello`. The answer (the board's address, which sections are on, the public boards, recent update dates) is kept in memory and in `UserDefaults`, so the next launch has an address straight away while a fresh copy loads.
+2. **`Hiint.showFeedback`** (or roadmap, updates, a request) asks `BoardPresenter` to present the board. On iOS that's a `HiintViewController` in a page sheet over the top-most view controller; on macOS a `HiintWindowController` opens a centred window. The controller shows a spinner and asks `HiintClient` for a `BoardDestination`: it waits for `hello`, falls back to the feedback board if the section is hidden or the board slug unknown (printing why), and builds the page's URL on the board's own address.
+3. **`BoardWebView`** loads that page in a `WKWebView` whose user agent has `HiintSDK/0.1.0 (iPhone; iOS 26.1; AppVersion/3.4)` added to the end. That text is how hiint knows it's inside an app: it hides the Dashboard item and records the device line. The web view fades in when the page posts `ready`, when it finishes loading, or after three seconds, whichever is first.
+4. **Every navigation** goes through `navigationDecision`. The board's own origin and hiint's sign-in pages (`/login`, `/signup`, `/auth/…` and so on, on `hiint.app`) stay in the sheet; anything else opens in the system browser. Links that would open a new tab are handled the same way.
+5. **The page talks to the SDK** by posting JSON to `window.webkit.messageHandlers.hiint`. `BridgeMessage` reads it: `ready`, `openExternal`, `signIn` and `unreadUpdates`, with anything newer ignored.
+6. **Google sign-in:** the page posts `signIn { provider: "google", returnPath }`. The SDK makes a `SignInChallenge` (a random verifier and its SHA-256 challenge), and opens `https://hiint.app/sdk/sign-in?…&challenge=…` in `ASWebAuthenticationSession`. When hiint redirects to `hiint-sdk://signed-in?code=…`, the sheet closes and the web view loads `https://hiint.app/sdk/session?code=…&verifier=…`, which turns the code into a session and sends the web view back to the page it was on.
+7. **The badge:** `unreadUpdatesCount()` counts `hello`'s recent update dates later than the time Updates was last opened on this device. Opening Updates, from the app or from the tab inside the sheet, resets it.
+8. **`logout`** forgets the identity and deletes hiint's cookies from the web view's store, so the next person to use the app isn't signed in as the last.
+
+## The pieces
+
+- **`Hiint.swift`**: the public API, a `@MainActor` enum of static functions, and `HiintPresentationStyle`.
+- **`HiintClient.swift`**: the one shared object holding the workspace, the `HelloLoader` and the identity; builds `BoardDestination`s, counts unread updates and clears cookies on logout. `isHiintCookie` decides which cookies are hiint's.
+- **`Configuration/Hello.swift`**: the `hello` response as a `Codable` struct, with a date reader that accepts JavaScript's fractional seconds.
+- **`Configuration/HelloLoader.swift`**: fetches `hello` at most once at a time, caches it on disk, and prints a readable warning for a wrong slug or a network failure.
+- **`URLs/BoardURL.swift`**: `BoardSection`, the page path for each, and `availableSection`, the fallback when a section is hidden.
+- **`URLs/QueryEncoding.swift`**: strict percent-encoding, so a return path like `/?board=ideas&sort=new` survives as one value.
+- **`URLs/SDKUserAgent.swift`**: the user-agent text, with each field cleaned so an odd app version can't break the format hiint parses.
+- **`Bridge/BridgeMessage.swift`**: the page-to-SDK messages.
+- **`SignIn/`**: `SignInChallenge` (verifier and challenge), `ServerAddresses` (every URL on hiint's own host) and `signInOutcome` (reading the redirect), and `SignInCoordinator`, which runs the system sheet.
+- **`WebView/NavigationPolicy.swift`**: what stays in the sheet and what leaves.
+- **`WebView/BoardWebView.swift`**: the web view and its delegates, shared by iOS and macOS.
+- **`iOS/HiintViewController.swift`** and **`macOS/HiintWindowController.swift`**: the platform containers and `BoardPresenter`.
+- **`SwiftUI/HiintFeedbackView.swift`**: the SwiftUI view and the `.hiintFeedback(isPresented:)` modifier.
+- **`Support/Warn.swift`**: one place every `[Hiint]` console message goes through.
+
+## Unfamiliar APIs and techniques
+
+- **`@MainActor`** (Swift concurrency). Marks a type or function as running on the main thread, and the compiler enforces it. `Hiint`, `HiintClient` and the web view classes all touch UIKit, AppKit or WebKit, which must only be used on the main thread, so they're main-actor types and callers from other threads have to `await` them. [Docs](https://developer.apple.com/documentation/swift/mainactor).
+- **`nonisolated public static let version`**: on a `@MainActor` type, even a constant would need `await` to read from elsewhere. `nonisolated` says this property doesn't need the main thread (a `String` constant is safe anywhere), so it can be read from any thread.
+- **`Task { … }` inside a main-actor method** inherits the main actor, so `HelloLoader.startRequest` can update `hello` when the request finishes without hopping threads by hand. The network call itself is in a `nonisolated static func`, so it runs off the main thread while it waits.
+- **`WKWebViewConfiguration.applicationNameForUserAgent`** (WebKit). The last part of the web view's user agent. Its default on iOS is `Mobile/15E148`; the SDK appends its own text to that instead of replacing it, so the web view still says what it is. Replacing the whole user agent would hide the web view from Google's sign-in check, which is against Google's policy and could stop working at any time. [Docs](https://developer.apple.com/documentation/webkit/wkwebviewconfiguration/applicationnameforuseragent).
+- **`WKUserContentController.add(_:name:)`** and **`WKScriptMessageHandler`** (WebKit). Registering a handler named `hiint` makes `window.webkit.messageHandlers.hiint.postMessage(…)` available to the page; whatever it posts arrives in `userContentController(_:didReceive:)` as `message.body` (dictionaries, arrays, strings and numbers). [Docs](https://developer.apple.com/documentation/webkit/wkusercontentcontroller/add(_:name:)).
+- **`WeakScriptMessageHandler`**: the content controller keeps a strong reference to every handler. If `BoardWebView` registered itself, the web view would own the controller, which would own `BoardWebView`, which owns the web view: a cycle that never frees. The small proxy holds `BoardWebView` weakly to break it.
+- **`webView(_:decidePolicyFor:) async -> WKNavigationActionPolicy`** (`WKNavigationDelegate`). Asked before every navigation; returning `.cancel` stops it. The SDK cancels and opens the URL in Safari for anything off the board. `navigationAction.targetFrame?.isMainFrame` is false for embedded frames (a YouTube player in a comment), which are left alone.
+- **`webView(_:createWebViewWith:for:windowFeatures:)`** (`WKUIDelegate`). Called when a link wants a new window (`target="_blank"`, which hiint uses for links in comments). Returning `nil` refuses the new window; the SDK opens the link itself instead. Without a `uiDelegate`, those links would silently do nothing.
+- **`ASWebAuthenticationSession`** (AuthenticationServices). The system's sign-in sheet, the one apps use for "Sign in with Google". It runs in Safari's engine, shares Safari's cookies (so someone already signed in to Google just picks their account), and ends when the page redirects to the given custom scheme (`hiint-sdk`); iOS hands that redirect only to the session that started it, so no `Info.plist` entry is needed. `presentationContextProvider` tells it which window to appear over. [Docs](https://developer.apple.com/documentation/authenticationservices/aswebauthenticationsession).
+- **`nonisolated func presentationAnchor(for:)` with `MainActor.assumeIsolated`**: the protocol method isn't declared main-actor in every SDK, so it's implemented as `nonisolated` (safe either way), and `assumeIsolated` tells the compiler "this really is called on the main thread, let me read the main-actor property". The system does call it on the main thread; if it ever didn't, `assumeIsolated` would crash loudly rather than race quietly.
+- **PKCE** (RFC 7636, "Proof Key for Code Exchange"). The SDK keeps a random verifier and gives hiint only its SHA-256 hash, the challenge. The code hiint sends back can only be swapped for a session by someone presenting the verifier. On iOS the redirect can't be intercepted, so this is belt and braces; on Android, where any app can claim a custom scheme, it's what makes a stolen code useless. `SHA256.hash(data:)` is from CryptoKit; `base64URLEncoded` turns the bytes into URL-safe text. The test uses the RFC's own example values.
+- **`percentEncodedQuery` instead of `URLQueryItem`**: Foundation's `URLComponents.queryItems` leaves `&`, `=`, `+` and `/` unescaped in values, because they're legal in a query. A return path like `/?board=ideas&sort=new` would then split into several parameters, and a `+` in an email would arrive as a space. The SDK escapes everything but letters, digits and `-._~`.
+- **`ISO8601DateFormatter` with `.withFractionalSeconds`**: JavaScript's `toISOString()` writes `2026-11-01T09:12:00.000Z`, which Foundation's built-in `.iso8601` decoding strategy rejects. `parseInternetDate` tries with fractional seconds, then without.
+- **`sheetPresentationController`** (UIKit, iOS 15). Configures a page sheet: `detents` are the heights it can rest at (`.medium()` and `.large()`), and `prefersGrabberVisible` draws the handle. [Docs](https://developer.apple.com/documentation/uikit/uisheetpresentationcontroller).
+- **`UIApplication.shared.connectedScenes … .flatMap(\.windows)`** walks every foreground window scene to find the key window, then follows `presentedViewController` to the top-most screen, so the sheet appears over whatever the app is showing, including another sheet.
+- **`UIViewControllerRepresentable`** / **`NSViewControllerRepresentable`** (SwiftUI). Wrap a UIKit or AppKit view controller so it can sit in a SwiftUI view; `HiintFeedbackView` is the same controller the sheets use.
+- **`#if os(macOS)` on a modifier**: Swift allows `#if` around a postfix member in a view chain, so the macOS-only `.frame(minWidth:…)` applies only there.
+- **Swift Testing** (`import Testing`, `@Test`, `#expect`, `#require`). Apple's newer test framework. `@Test(arguments:)` runs one test once per input; `#require` stops the test when a value is missing instead of carrying on with `nil`.
+
+## Worth knowing
+
+- **Nothing works end to end until hiint ships its side:** `hello`, recognising the user agent, the bridge script in the board, `/sdk/sign-in`, `/sdk/complete` and `/sdk/session`. Until then `setup` prints "No hiint workspace is called …" (a 404 from `hello`), and the sheet shows "Couldn't load feedback".
+- **The contract is versioned.** The `hello` fields, the user agent format, the bridge messages and the `/sdk/…` paths are `v1`. Changing any of them in a way an old SDK can't read means a `v2` beside it, because apps in the App Store keep the version they shipped with.
+- **The user agent is appended, never replaced,** on purpose (see the glossary). Don't "fix" Google sign-in by replacing it.
+- **`identify` only passes the email to Google sign-in in 0.1.** The name, photo and signature are stored for automatic login (step 5 of the plan), which will swap them for a one-time code; they never go in a URL.
+- **`logout` deletes cookies, not the server session.** The session row lives until it expires on hiint's side, but nothing on the device can use it any more. Cookies on the customer's own domain (other than the board's exact host) are never touched.
+- **The first `unreadUpdatesCount()` returns 0** and records "now", so updates published before someone installed the app don't show as new.
+- **On macOS** the board always opens in a window, whatever the presentation style. A sandboxed app needs the outgoing-connections entitlement.
+- **What I'd change first if requirements move:** the navigation allow-list in `NavigationPolicy.swift` (any new hiint sign-in page has to be added there, or it will open in Safari mid-sign-in), and `availableSection` if hiint ever lets the app open a team-only board.
