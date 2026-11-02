@@ -71,7 +71,7 @@ Or place `HiintFeedbackView()` anywhere in your own layout.
 
 ## Signing in
 
-People sign in with their hiint account, exactly as on your board in a phone's browser: email and password, GitHub or Google. Continue with Google opens the system's sign-in sheet, because Google doesn't allow signing in inside an app's web view. Nothing is needed in your `Info.plist`.
+People sign in with their hiint account, exactly as on your board in a phone's browser: email and password, GitHub or Google. Continue with Google and Continue with GitHub open the system's sign-in sheet: Google doesn't allow signing in inside an app's web view, and GitHub's sign-in works best there too. Nothing is needed in your `Info.plist`.
 
 They stay signed in the next time the board opens. When someone logs out of your app, call:
 

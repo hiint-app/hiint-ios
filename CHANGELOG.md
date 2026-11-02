@@ -11,4 +11,4 @@ The first version, with normal sign-in.
 - `HiintFeedbackView` and the `.hiintFeedback(isPresented:board:)` modifier for SwiftUI.
 - `feedbackURL(board:)`, `roadmapURL()` and `updatesURL()` for your own web view.
 - `unreadUpdatesCount()` for a "What's new" badge.
-- Signing in works as on the board in a phone's browser; Continue with Google opens the system sign-in sheet, since Google doesn't allow sign-in inside an app's web view.
+- Signing in works as on the board in a phone's browser; Continue with Google and Continue with GitHub open the system sign-in sheet, since Google doesn't allow sign-in inside an app's web view and GitHub's sign-in pages are off the board.
