@@ -17,7 +17,7 @@ Or in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/hiint-app/hiint-ios", from: "0.2.0")
+    .package(url: "https://github.com/hiint-app/hiint-ios", from: "0.3.0")
 ]
 ```
 
@@ -86,6 +86,16 @@ Hiint.identify(userId: user.id, email: user.email, name: user.name)
 With automatic login on (Pro), this signs them straight in the next time the board opens. Only `userId` is required: pass `email` and hiint emails them about their own requests and comments, and `name` (they get a random one without it). If your app has a server, pass the `signature` it makes with your project secret; that's what proves who they are.
 
 Without one, the SDK keeps a claim token for that user ID in the Keychain, so another device can't later sign in as them. `logout()` signs the board out and leaves the claim token in place.
+
+### Telling hiint who pays
+
+```swift
+Hiint.identify(userId: user.id, email: user.email, name: user.name, isPaying: user.hasActiveSubscription)
+```
+
+Report `true` to mark your customer as paying for your team: a gold Paying badge beside their name and on their requests, seen only by your team in the dashboard and on your board. Your customers never see it, including the customer themselves. `false` or `nil` removes the badge. If they voted while your app reported that they paid, the team's paying-vote count keeps that context after they cancel. New feedback uses the last status your app has sent to hiint.
+
+hiint gets the status the next time the board opens, so call `identify` again whenever it changes. Leaving `isPaying` out (the call above without it) keeps whatever hiint last heard; passing `nil` clears it. It needs automatic login on (Pro).
 
 ## A "What's new" badge
 

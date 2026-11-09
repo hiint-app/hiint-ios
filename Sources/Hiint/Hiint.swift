@@ -12,7 +12,7 @@ public enum HiintPresentationStyle: Sendable {
 @MainActor
 public enum Hiint {
     /// This SDK's version, sent to hiint in the web view's user agent.
-    nonisolated public static let version = "0.2.0"
+    nonisolated public static let version = "0.3.0"
 
     /// hiint's own address. Only change it to point at a local hiint while developing.
     nonisolated public static let defaultServerURL = URL(string: "https://hiint.app")!
@@ -27,7 +27,19 @@ public enum Hiint {
         userId: String, email: String? = nil, name: String? = nil, avatarURL: URL? = nil, signature: String? = nil
     ) {
         HiintClient.shared.identify(
-            userId: userId, email: email, name: name, avatarURL: avatarURL, signature: signature)
+            userId: userId, email: email, name: name, avatarURL: avatarURL, signature: signature,
+            paymentStatus: .unchanged)
+    }
+
+    /// The same, with whether they pay you: `true` gives them a Paying badge only your team sees, `false` or `nil` removes it.
+    /// hiint gets it the next time the board opens.
+    public static func identify(
+        userId: String, email: String? = nil, name: String? = nil, avatarURL: URL? = nil, signature: String? = nil,
+        isPaying: Bool?
+    ) {
+        HiintClient.shared.identify(
+            userId: userId, email: email, name: name, avatarURL: avatarURL, signature: signature,
+            paymentStatus: .set(isPaying))
     }
 
     /// Forgets the identified user and signs the board out on this device. Call it when they log out of your app.

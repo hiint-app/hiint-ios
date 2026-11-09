@@ -1,5 +1,11 @@
 import Foundation
 
+/** What an identify says about payment: nothing (hiint keeps what it had), or a status, where `nil` clears it. */
+enum PaymentStatusUpdate: Equatable, Sendable {
+    case unchanged
+    case set(Bool?)
+}
+
 /** Who the app says is signed in, as `POST /api/sdk/v1/<workspace>/identify` sends it. */
 struct IdentifyCall: Equatable, Sendable {
     var userId: String
@@ -9,6 +15,7 @@ struct IdentifyCall: Equatable, Sendable {
     var signature: String
     var claimToken: String
     var challenge: String
+    var paymentStatus: PaymentStatusUpdate = .unchanged
 }
 
 /** What that call came back with. `automaticLoginOff` is remembered until the next `setup`. */
@@ -33,7 +40,7 @@ func identifyBody(_ call: IdentifyCall) -> Data {
     encoder.keyEncodingStrategy = .convertToSnakeCase
     let body = IdentifyBody(
         userId: call.userId, email: call.email, name: call.name, avatarUrl: call.avatarURL, signature: call.signature,
-        claimToken: call.claimToken, challenge: call.challenge)
+        claimToken: call.claimToken, challenge: call.challenge, paymentStatus: call.paymentStatus)
     return (try? encoder.encode(body)) ?? Data()
 }
 
@@ -99,6 +106,31 @@ private struct IdentifyBody: Encodable {
     let signature: String
     let claimToken: String
     let challenge: String
+    let paymentStatus: PaymentStatusUpdate
+
+    private enum CodingKeys: String, CodingKey {
+        case userId, email, name, avatarUrl, signature, claimToken, challenge, isPaying
+    }
+
+    /// `is_paying` is left out when unchanged and written as `null` when cleared, since hiint treats the two differently.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(userId, forKey: .userId)
+        try container.encode(email, forKey: .email)
+        try container.encode(name, forKey: .name)
+        try container.encode(avatarUrl, forKey: .avatarUrl)
+        try container.encode(signature, forKey: .signature)
+        try container.encode(claimToken, forKey: .claimToken)
+        try container.encode(challenge, forKey: .challenge)
+        switch paymentStatus {
+        case .unchanged:
+            break
+        case .set(let isPaying?):
+            try container.encode(isPaying, forKey: .isPaying)
+        case .set(nil):
+            try container.encodeNil(forKey: .isPaying)
+        }
+    }
 }
 
 private struct SignedInBody: Decodable {

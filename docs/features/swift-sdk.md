@@ -1,4 +1,4 @@
-# The Swift SDK, version 0.2
+# The Swift SDK, version 0.3
 
 The plan this follows is `docs/plans/completed/mobile-sdks.md` in the hiint repository, and automatic login is `docs/plans/completed/automatic-login.md`. Everything that can be checked without a server is covered by the unit tests.
 
@@ -16,7 +16,8 @@ An app maker adds the package, calls `Hiint.setup(workspace: "driftnote")` at la
 6. **Google and GitHub sign-in:** the page posts `signIn { provider: "google" or "github", returnPath }`; the SDK passes the provider through unchanged. The SDK makes a `SignInChallenge` (a random verifier and its SHA-256 challenge), and opens `https://hiint.app/sdk/sign-in?…&challenge=…` in `ASWebAuthenticationSession`. When hiint redirects to `hiint-sdk://signed-in?code=…`, the sheet closes and the web view loads `https://hiint.app/sdk/session?code=…&verifier=…`, which turns the code into a session and sends the web view back to the page it was on.
 7. **The badge:** `unreadUpdatesCount()` counts `hello`'s recent update dates later than the time Updates was last opened on this device. Opening Updates, from the app or from the tab inside the sheet, resets it.
 8. **Automatic login (0.2).** When `identify` has been called, `destination(for:)` (which `show…` and the URL getters use) `POST`s to `/api/sdk/v1/<slug>/identify` with a fresh PKCE challenge and loads `/api/board/app-session` on the board's host instead of the page. An unsigned identity's claim token (`unsignedClaimAccount` decides which identities have one) is read and written through `ClaimTokenStore`: the Keychain in the app (`ClaimTokenKeychain`, service `app.hiint.claim`), a dictionary in tests. A `403` of `automatic_login_off` is remembered until the next `setup`; any other refusal prints once and opens the board as it is, where an app session it already has still counts.
-9. **`logout`** forgets the identity, `POST`s the board's `/api/board/sign-out` with the web view's cookie and an `Origin`, then deletes hiint's cookies. The claim token stays.
+9. **Payment status (0.3).** `identify(…, isPaying:)` stores a `PaymentStatusUpdate` (`.unchanged`, or `.set(Bool?)`) on the identity, and `IdentifyBody` writes it as `is_paying`: left out for `.unchanged`, `true`/`false`, or `null` for `.set(nil)`. hiint keeps the last status when the field is missing and clears it on `null`, so the two must never collapse. The old overload without `isPaying` sends nothing, so apps on 0.2 code clear nothing. The plan is `docs/plans/pending/paying-customers.md` in the hiint repository.
+10. **`logout`** forgets the identity, `POST`s the board's `/api/board/sign-out` with the web view's cookie and an `Origin`, then deletes hiint's cookies. The claim token stays.
 
 ## The pieces
 
@@ -54,6 +55,8 @@ An app maker adds the package, calls `Hiint.setup(workspace: "driftnote")` at la
 - **`UIApplication.shared.connectedScenes … .flatMap(\.windows)`** walks every foreground window scene to find the key window, then follows `presentedViewController` to the top-most screen, so the sheet appears over whatever the app is showing, including another sheet.
 - **`UIViewControllerRepresentable`** / **`NSViewControllerRepresentable`** (SwiftUI). Wrap a UIKit or AppKit view controller so it can sit in a SwiftUI view; `HiintFeedbackView` is the same controller the sheets use.
 - **`#if os(macOS)` on a modifier**: Swift allows `#if` around a postfix member in a view chain, so the macOS-only `.frame(minWidth:…)` applies only there.
+- **A custom `encode(to:)` with `encodeNil(forKey:)`** (Foundation's `Encodable`). The synthesised encoder skips `nil` optionals, so it can't tell "say nothing" from "say null". `IdentifyBody` writes its keys by hand: nothing for `.unchanged`, and `encodeNil` for a cleared status, which puts `"is_paying": null` in the JSON. `JSONEncoder`'s `.convertToSnakeCase` still turns the `isPaying` key into `is_paying`.
+- **Two overloads instead of a default argument**: `isPaying: Bool? = nil` would make "left out" and "nil" the same call. A second `identify` with a required `isPaying: Bool?` keeps the old call compiling unchanged and makes `nil` mean clear.
 - **Swift Testing** (`import Testing`, `@Test`, `#expect`, `#require`). Apple's newer test framework. `@Test(arguments:)` runs one test once per input; `#require` stops the test when a value is missing instead of carrying on with `nil`.
 
 ## Worth knowing

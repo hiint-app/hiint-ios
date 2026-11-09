@@ -2,6 +2,13 @@
 
 Versions follow [semantic versioning](https://semver.org), and each release is a tag of the same name (`0.1.0`, no `v`).
 
+## 0.3.0 (unreleased)
+
+Telling hiint who pays.
+
+- `identify(userId:email:name:avatarURL:signature:isPaying:)` reports whether the person pays you: `true` gives them a Paying badge only the workspace's team sees, `false` or `nil` removes it. Sent the next time the board opens.
+- The call without `isPaying` still compiles and leaves the status hiint has alone; `nil` clears it.
+
 ## 0.2.0 (2 November 2026)
 
 Automatic login. With it on for the workspace, opening the board signs in the person from `identify`.
