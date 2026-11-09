@@ -17,6 +17,7 @@ struct AppIdentity: Equatable, Sendable {
     let name: String
     let avatarURL: String
     let signature: String
+    let paymentStatus: PaymentStatusUpdate
 }
 
 /** The SDK's state for the app's run: the workspace, its `hello`, and who's identified. */
@@ -49,11 +50,14 @@ final class HiintClient {
         loader.refresh()
     }
 
-    func identify(userId: String, email: String?, name: String?, avatarURL: URL?, signature: String?) {
+    func identify(
+        userId: String, email: String?, name: String?, avatarURL: URL?, signature: String?,
+        paymentStatus: PaymentStatusUpdate
+    ) {
         identifyWarning = nil
         identity = AppIdentity(
             userId: userId, email: email ?? "", name: name ?? "", avatarURL: avatarURL?.absoluteString ?? "",
-            signature: signature ?? "")
+            signature: signature ?? "", paymentStatus: paymentStatus)
     }
 
     func logout() {
@@ -101,7 +105,8 @@ final class HiintClient {
         let claimToken = claimAccount.flatMap(claimTokens.read) ?? ""
         let call = IdentifyCall(
             userId: identity.userId, email: identity.email, name: identity.name, avatarURL: identity.avatarURL,
-            signature: identity.signature, claimToken: claimToken, challenge: challenge.challenge)
+            signature: identity.signature, claimToken: claimToken, challenge: challenge.challenge,
+            paymentStatus: identity.paymentStatus)
         guard let request = identifyRequest(serverURL: server, workspace: workspace, call: call) else { return nil }
         let result: IdentifyResult
         do {

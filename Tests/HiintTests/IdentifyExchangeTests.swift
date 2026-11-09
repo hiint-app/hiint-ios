@@ -24,6 +24,22 @@ struct IdentifyExchangeTests {
         #expect(json["challenge"] == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     }
 
+    @Test func paymentStatusIsLeftOutSentOrClearedAsAsked() throws {
+        func body(_ paymentStatus: PaymentStatusUpdate) throws -> [String: Any] {
+            let call = IdentifyCall(
+                userId: "user-42", email: "", name: "", avatarURL: "", signature: "", claimToken: "",
+                challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", paymentStatus: paymentStatus)
+            return try #require(JSONSerialization.jsonObject(with: identifyBody(call)) as? [String: Any])
+        }
+
+        #expect(try body(.unchanged)["is_paying"] == nil)
+        #expect(try body(.set(true))["is_paying"] as? Bool == true)
+        #expect(try body(.set(false))["is_paying"] as? Bool == false)
+        let cleared = try body(.set(nil))
+        #expect(cleared.keys.contains("is_paying"))
+        #expect(cleared["is_paying"] is NSNull)
+    }
+
     @Test func readsASignedInAnswerAndAClaimToken() {
         let body = Data(#"{"code":"abc","claim_token":"tok"}"#.utf8)
         #expect(identifyResult(status: 200, body: body) == .signedIn(code: "abc", claimToken: "tok"))
@@ -95,4 +111,16 @@ private final class SavedClaimTokens: @unchecked Sendable {
 
     func token(for account: String) -> String? { lock.withLock { tokens[account] } }
     func keep(_ token: String, for account: String) { lock.withLock { tokens[account] = token } }
+}
+
+@MainActor
+struct IdentifyOverloadTests {
+    @Test func theOldCallLeavesPaymentAloneAndTheNewOneSetsOrClearsIt() {
+        Hiint.identify(userId: "user-42", email: "sam@example.com")
+        #expect(HiintClient.shared.identity?.paymentStatus == .unchanged)
+        Hiint.identify(userId: "user-42", isPaying: true)
+        #expect(HiintClient.shared.identity?.paymentStatus == .set(true))
+        Hiint.identify(userId: "user-42", signature: "abc", isPaying: nil)
+        #expect(HiintClient.shared.identity?.paymentStatus == .set(nil))
+    }
 }
