@@ -2,7 +2,7 @@
 
 Versions follow [semantic versioning](https://semver.org), and each release is a tag of the same name (`0.1.0`, no `v`).
 
-## 0.3.0 (unreleased)
+## 0.3.0 (9 November 2026)
 
 Telling hiint who pays.
 
